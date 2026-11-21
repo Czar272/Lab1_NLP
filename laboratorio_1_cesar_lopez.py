@@ -318,6 +318,14 @@ def procesar_texto(texto):
     }
 
 
+MENSAJES_ACCION = {
+    "ALLOW": "El texto puede continuar sin modificacion.",
+    "WARN": "Advertencia: el texto contiene URLs; revisar antes de enviarlo al modelo.",
+    "REDACT": "Se reemplazaron los datos sensibles por etiquetas antes de continuar.",
+    "BLOCK": "El texto contiene un posible secreto y no debe enviarse al modelo.",
+}
+
+
 def imprimir_resultado_pipeline(resultado, indice):
     """Imprime el resultado completo del pipeline."""
     print("=" * 80)
@@ -338,7 +346,10 @@ def imprimir_resultado_pipeline(resultado, indice):
     else:
         print("  No se detectaron datos sensibles.")
 
-    print(f"\nAccion recomendada: {resultado['guardrail']['accion']}")
+    accion = resultado["guardrail"]["accion"]
+    print(f"\nAccion recomendada: {accion}")
+    if accion in MENSAJES_ACCION:
+        print(f"  {MENSAJES_ACCION[accion]}")
 
     print("\nTexto seguro:")
     if resultado["guardrail"]["texto_seguro"] is None:
