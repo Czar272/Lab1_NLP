@@ -362,24 +362,77 @@ def imprimir_resultado_pipeline(resultado, indice):
 # 8. Demos Para Clase
 # -----------------------------------------------------------------------------
 
-def demo_comparar_tokenizadores():
-    """Compara tres formas de tokenizar el mismo texto."""
-    texto = "Mi numero es +502 5555-1234 y mi correo es ana@uvg.edu.gt"
+TOKENIZADORES = {
+    "Espacios": tokenizar_por_espacios,
+    "Regex basica": tokenizar_con_regex_basico,
+    "Regex mixta": tokenizar_con_regex_mixto,
+}
 
+TEXTOS_COMPARACION = [
+    "Mi numero es +502 5555-1234 y mi correo es ana@uvg.edu.gt",
+    "Hola!!! necesito ayuda con mi cuenta :( revisa https://docs.example.com/nlp",
+    "El modelo GPT-4.1 respondio: 'No tengo suficiente contexto.'",
+]
+
+
+def demo_comparar_tokenizadores():
+    """Compara las tres formas de tokenizar sobre varios textos."""
     print("=" * 80)
     print("DEMO: COMPARACION DE TOKENIZADORES")
     print("=" * 80)
-    print("Texto:")
-    print(texto)
 
-    print("\nTokenizacion por espacios:")
-    print(tokenizar_por_espacios(texto))
+    for indice, texto in enumerate(TEXTOS_COMPARACION, start=1):
+        print(f"\nTexto {indice}:")
+        print(texto)
 
-    print("\nTokenizacion Regex basica:")
-    print(tokenizar_con_regex_basico(texto))
+        for nombre, tokenizador in TOKENIZADORES.items():
+            tokens = tokenizador(texto)
+            print(f"\n  Tokenizacion {nombre} ({len(tokens)} tokens):")
+            print(f"  {tokens}")
 
-    print("\nTokenizacion Regex mixta:")
-    print(tokenizar_con_regex_mixto(texto))
+    print()
+    print("Observaciones:")
+    print("  - Espacios: conserva correos y URLs, pero deja la puntuacion pegada")
+    print("    a las palabras ('Hola!!!', 'contexto.'') y separa el telefono en partes.")
+    print("  - Regex basica: pasa todo a minusculas y solo conserva letras, digitos")
+    print("    y '_', por lo que rompe correos, URLs, telefonos y versiones como")
+    print("    GPT-4.1, y pierde emoticonos y signos de puntuacion.")
+    print("  - Regex mixta: mantiene correos y URLs como un solo token y separa la")
+    print("    puntuacion en tokens propios; el telefono sigue dividido en partes.")
+    print()
+
+    demo_resumen_tokenizadores()
+
+
+def demo_resumen_tokenizadores():
+    """Tabla con el numero de tokens y tokens unicos por tokenizador.
+
+    Se calcula sobre los textos de prueba normalizados y ya protegidos por el
+    guardrail (los textos bloqueados se omiten, igual que en el pipeline).
+    """
+    print("=" * 80)
+    print("RESUMEN: TOKENS (UNICOS) POR TOKENIZADOR EN LOS TEXTOS DE PRUEBA")
+    print("=" * 80)
+
+    encabezado = f"{'Texto':<7}{'Accion':<9}"
+    for nombre in TOKENIZADORES:
+        encabezado += f"{nombre:>16}"
+    print(encabezado)
+    print("-" * len(encabezado))
+
+    for indice, texto in enumerate(TEXTOS_DE_PRUEBA, start=1):
+        guardrail = aplicar_guardrail(normalizar_espacios(texto))
+        fila = f"{indice:<7}{guardrail['accion']:<9}"
+
+        if guardrail["texto_seguro"] is None:
+            fila += f"{'(bloqueado)':>16}" * len(TOKENIZADORES)
+        else:
+            for tokenizador in TOKENIZADORES.values():
+                tokens = tokenizador(guardrail["texto_seguro"])
+                fila += f"{f'{len(tokens)} ({len(set(tokens))})':>16}"
+
+        print(fila)
+
     print()
 
 
