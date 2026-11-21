@@ -449,53 +449,139 @@ def demo_guardrails():
 
 
 # -----------------------------------------------------------------------------
-# 9. Ejercicios Para Estudiantes
+# 9. Ejercicios
 # -----------------------------------------------------------------------------
 
-def ejercicio_1_agregar_textos():
-    """TODO para estudiantes.
+def imprimir_titulo(titulo):
+    """Imprime un encabezado de seccion."""
+    print("=" * 80)
+    print(titulo)
+    print("=" * 80)
 
-    Agreguen 3 textos nuevos a TEXTOS_DE_PRUEBA:
-    - Uno con un correo simulado.
-    - Uno con un telefono simulado.
-    - Uno con una instruccion sospechosa, por ejemplo una clave o token.
+
+def ejercicio_1_agregar_textos():
+    """Ejercicio 1: textos de prueba.
+
+    Los textos nuevos se agregaron directamente en TEXTOS_DE_PRUEBA (correo,
+    telefono, DPI, password, URL, instruccion sospechosa con token, numero
+    largo, correo ofuscado y un texto limpio). Esta funcion verifica que la
+    lista cubra todos los tipos de datos exigidos en la Parte A.
     """
-    pass
+    imprimir_titulo("EJERCICIO 1: COBERTURA DE LOS TEXTOS DE PRUEBA")
+
+    tipos_requeridos = ["EMAIL", "PHONE", "URL", "SECRET_WORD", "DPI", "LONG_NUMBER"]
+    textos_por_tipo = {tipo: [] for tipo in tipos_requeridos}
+
+    for indice, texto in enumerate(TEXTOS_DE_PRUEBA, start=1):
+        for hallazgo in detectar_datos_sensibles(normalizar_espacios(texto)):
+            if indice not in textos_por_tipo[hallazgo["tipo"]]:
+                textos_por_tipo[hallazgo["tipo"]].append(indice)
+
+    print(f"Total de textos de prueba: {len(TEXTOS_DE_PRUEBA)}")
+    for tipo, indices in textos_por_tipo.items():
+        estado = "OK" if indices else "FALTA"
+        print(f"  [{estado}] {tipo:<12} presente en textos: {indices}")
+    print()
+
+    return textos_por_tipo
 
 
 def ejercicio_2_mejorar_regex_dpi():
-    """TODO para estudiantes.
+    """Ejercicio 2: patron DPI.
 
-    Agreguen un patron llamado DPI al diccionario PATRONES_SENSIBLES.
-
-    Pista:
-    - En Guatemala, un DPI suele tener 13 digitos.
-    - Puede aparecer con espacios o guiones.
-
-    Ejemplos que podrian detectar:
-    - 1234567890101
-    - 1234 56789 0101
-    - 1234-56789-0101
+    El patron DPI se agrego a PATRONES_SENSIBLES:
+        \\b\\d{4}[\\s\\-]?\\d{5}[\\s\\-]?\\d{4}\\b
+    Acepta 13 digitos seguidos o en bloques 4-5-4 separados por espacio o
+    guion. Como un DPI tambien cumple el patron PHONE, DPI tiene mayor
+    prioridad en PRIORIDAD_DETECCION para que se clasifique correctamente.
     """
-    pass
+    imprimir_titulo("EJERCICIO 2: PRUEBAS DEL PATRON DPI")
+
+    casos = [
+        ("1234567890101", True),
+        ("1234 56789 0101", True),
+        ("1234-56789-0101", True),
+        ("Mi DPI simulado es 1234 56789 0101.", True),
+        ("123456789010", False),     # 12 digitos
+        ("12345678901012", False),   # 14 digitos
+        ("1234 5678 90101", False),  # bloques 4-4-5
+    ]
+
+    for texto, esperado in casos:
+        hallazgos = detectar_datos_sensibles(texto)
+        dpi = [h["valor"] for h in hallazgos if h["tipo"] == "DPI"]
+        tipos = [h["tipo"] for h in hallazgos]
+        estado = "OK" if bool(dpi) == esperado else "FALLO"
+        print(f"  [{estado}] {texto!r:<40} -> tipos detectados: {tipos}")
+    print()
 
 
 def ejercicio_3_accion_warn():
-    """TODO para estudiantes.
+    """Ejercicio 3: politica con WARN.
 
-    Modifiquen decidir_accion para usar WARN.
-
-    Politica sugerida:
-    - SECRET_WORD -> BLOCK
-    - EMAIL o PHONE -> REDACT
-    - URL -> WARN
-    - Sin hallazgos -> ALLOW
+    decidir_accion ya implementa la politica completa:
+    - SECRET_WORD                     -> BLOCK
+    - EMAIL, PHONE, DPI o LONG_NUMBER -> REDACT
+    - Solo URL                        -> WARN
+    - Sin hallazgos                   -> ALLOW
+    Esta funcion valida la politica con casos controlados.
     """
-    pass
+    imprimir_titulo("EJERCICIO 3: VALIDACION DE LA POLITICA DE GUARDRAIL")
+
+    casos = [
+        ("Hoy estudiamos tokenizacion.", "ALLOW"),
+        ("Revisen https://docs.example.com/nlp", "WARN"),
+        ("Mas info en www.example.com", "WARN"),
+        ("Mi correo es ana.lopez@example.com", "REDACT"),
+        ("Llamame al +502 5555-1234", "REDACT"),
+        ("DPI simulado 1234-56789-0101", "REDACT"),
+        ("Expediente 2024000123", "REDACT"),
+        ("Correo ana@example.com y web https://example.com", "REDACT"),
+        ("Mi password es Cambiar123", "BLOCK"),
+        ("api_key=abc123-simulada y correo ana@example.com", "BLOCK"),
+    ]
+
+    aciertos = 0
+    for texto, esperado in casos:
+        resultado = aplicar_guardrail(texto)
+        obtenido = resultado["accion"]
+        aciertos += obtenido == esperado
+        estado = "OK" if obtenido == esperado else "FALLO"
+        print(f"  [{estado}] esperado={esperado:<7} obtenido={obtenido:<7} | {texto}")
+
+    print(f"\nCasos correctos: {aciertos}/{len(casos)}")
+    print()
+
+
+REFLEXION = """\
+Falsos positivos: el patron PHONE es muy general y marca cualquier secuencia
+de digitos con espacios o guiones, por eso la fecha 20-11-2026 se redacto como
+telefono. SECRET_WORD tambien bloquearia frases inocentes como "olvide mi
+clave" o "un token es la unidad minima de texto", porque detecta la palabra y
+no un secreto real.
+
+Falsos negativos: "secreta" no coincide con \\bsecret\\b, el correo ofuscado
+"soporte [arroba] example [punto] com" paso como ALLOW, y tampoco se
+detectarian una contrasena escrita sin la palabra clave delante, numeros
+escritos en letras, nombres de personas o direcciones. Ademas, un telefono de
+8 digitos sin separadores se clasifica como LONG_NUMBER.
+
+Al redactar se pierde contexto util para el modelo: el dominio del correo, el
+codigo de pais del telefono o si dos menciones se refieren al mismo dato. Esto
+puede empeorar la respuesta, por ejemplo si el usuario pide ayuda justamente
+con su correo.
+
+Regex no es suficiente para una empresa real: no entiende contexto, es facil
+de evadir con variaciones de formato y no cubre datos sin estructura fija.
+Agregaria un detector de PII basado en NER (por ejemplo spaCy o Presidio),
+deteccion de secretos por entropia, validacion de formatos con checksum,
+seudonimizacion reversible guardando el mapeo de forma segura, revision de la
+salida del modelo y controles de acceso con auditoria de lo que se envia.\
+"""
 
 
 def ejercicio_4_reflexion():
-    """Preguntas para responder en el informe.
+    """Ejercicio 4: reflexion critica (ver tambien README.md).
 
     1. Que falsos positivos encontraron?
     2. Que falsos negativos encontraron?
@@ -503,7 +589,10 @@ def ejercicio_4_reflexion():
     4. Regex seria suficiente para proteger informacion de una empresa real?
     5. Que otra capa de seguridad agregarian?
     """
-    pass
+    imprimir_titulo("EJERCICIO 4: REFLEXION")
+    print(REFLEXION)
+    print(f"\n({len(REFLEXION.split())} palabras)")
+    print()
 
 
 # -----------------------------------------------------------------------------
@@ -513,6 +602,10 @@ def ejercicio_4_reflexion():
 def main():
     demo_comparar_tokenizadores()
     demo_guardrails()
+    ejercicio_1_agregar_textos()
+    ejercicio_2_mejorar_regex_dpi()
+    ejercicio_3_accion_warn()
+    ejercicio_4_reflexion()
 
 
 if __name__ == "__main__":
