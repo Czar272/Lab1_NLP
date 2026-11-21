@@ -209,28 +209,37 @@ def detectar_datos_sensibles(texto):
 # 6. Acciones De Guardrail
 # -----------------------------------------------------------------------------
 
+# Tipos de datos que obligan a redactar antes de enviar el texto al modelo.
+TIPOS_A_REDACTAR = {"EMAIL", "PHONE", "DPI", "LONG_NUMBER"}
+
+
 def decidir_accion(hallazgos):
     """Decide que accion tomar segun los datos detectados.
 
-    Politica simple:
-    - Si hay secretos, bloquear.
-    - Si hay email, telefono, URL, DPI o numero largo, redactar.
-    - Si no hay hallazgos, permitir.
+    Politica (de mayor a menor severidad):
+    - Contiene SECRET_WORD                      -> BLOCK
+    - Contiene EMAIL, PHONE, DPI o LONG_NUMBER  -> REDACT
+    - Contiene solo URL                         -> WARN
+    - No contiene hallazgos                     -> ALLOW
     """
     tipos = {hallazgo["tipo"] for hallazgo in hallazgos}
 
     if "SECRET_WORD" in tipos:
         return "BLOCK"
 
-    if tipos.intersection({"EMAIL", "PHONE", "URL", "DPI", "LONG_NUMBER"}):
+    if tipos.intersection(TIPOS_A_REDACTAR):
         return "REDACT"
+
+    if "URL" in tipos:
+        return "WARN"
 
     return "ALLOW"
 
 
+# Las URL no se redactan: por politica solo generan WARN. Si un texto con URL
+# se redacta por otro motivo (por ejemplo un telefono), la URL se conserva.
 ETIQUETAS_REDACCION = {
     "EMAIL": "[EMAIL_REDACTED]",
-    "URL": "[URL_REDACTED]",
     "PHONE": "[PHONE_REDACTED]",
     "DPI": "[DPI_REDACTED]",
     "LONG_NUMBER": "[NUMBER_REDACTED]",
