@@ -145,31 +145,64 @@ PATRONES_SENSIBLES = {
     "URL": r"https?://\S+|www\.\S+",
     "PHONE": r"\+?\d[\d\s\-]{7,}\d",
     "SECRET_WORD": r"(?i)\b(password|contrasena|contraseña|clave|secret|token|api_key|apikey)\b",
+    # DPI de Guatemala: 13 digitos, en bloques 4-5-4 separados opcionalmente
+    # por espacios o guiones (1234567890101, 1234 56789 0101, 1234-56789-0101).
+    "DPI": r"\b\d{4}[\s\-]?\d{5}[\s\-]?\d{4}\b",
     "LONG_NUMBER": r"\b\d{8,}\b",
 }
+
+# Varios patrones se traslapan: un DPI tambien cumple el patron PHONE y un
+# numero largo tambien puede cumplir PHONE. Para no reportar el mismo fragmento
+# dos veces, se evaluan los patrones en este orden (del mas especifico al mas
+# general) y se descarta cualquier coincidencia que se traslape con una
+# coincidencia de mayor prioridad.
+PRIORIDAD_DETECCION = [
+    "SECRET_WORD",
+    "URL",
+    "EMAIL",
+    "DPI",
+    "LONG_NUMBER",
+    "PHONE",
+]
+
+
+def _se_traslapan(inicio_a, fin_a, inicio_b, fin_b):
+    """Indica si dos intervalos [inicio, fin) comparten al menos un caracter."""
+    return inicio_a < fin_b and inicio_b < fin_a
 
 
 def detectar_datos_sensibles(texto):
     """Detecta datos sensibles usando los patrones definidos.
 
-    Retorna una lista de diccionarios con tipo y valor detectado.
+    Retorna una lista de diccionarios ordenada por posicion en el texto. Cada
+    hallazgo incluye:
+    - tipo: nombre del patron (EMAIL, URL, PHONE, ...).
+    - valor: fragmento exacto detectado.
+    - inicio / fin: posicion del fragmento, usada luego para redactar.
     """
     hallazgos = []
 
-    for tipo, patron in PATRONES_SENSIBLES.items():
-        coincidencias = re.findall(patron, texto)
+    for tipo in PRIORIDAD_DETECCION:
+        # Se usa finditer en lugar de findall para obtener la coincidencia
+        # completa (group(0)) aunque el patron tenga grupos, y su posicion.
+        for coincidencia in re.finditer(PATRONES_SENSIBLES[tipo], texto):
+            inicio, fin = coincidencia.span()
 
-        for coincidencia in coincidencias:
-            # re.findall puede devolver tuplas si el patron tiene grupos.
-            if isinstance(coincidencia, tuple):
-                coincidencia = " ".join(filter(None, coincidencia))
+            ya_cubierto = any(
+                _se_traslapan(inicio, fin, previo["inicio"], previo["fin"])
+                for previo in hallazgos
+            )
+            if ya_cubierto:
+                continue
 
             hallazgos.append({
                 "tipo": tipo,
-                "valor": coincidencia,
+                "valor": coincidencia.group(0),
+                "inicio": inicio,
+                "fin": fin,
             })
 
-    return hallazgos
+    return sorted(hallazgos, key=lambda hallazgo: hallazgo["inicio"])
 
 
 # -----------------------------------------------------------------------------
@@ -181,7 +214,7 @@ def decidir_accion(hallazgos):
 
     Politica simple:
     - Si hay secretos, bloquear.
-    - Si hay email, telefono, URL o numero largo, redactar.
+    - Si hay email, telefono, URL, DPI o numero largo, redactar.
     - Si no hay hallazgos, permitir.
     """
     tipos = {hallazgo["tipo"] for hallazgo in hallazgos}
@@ -189,26 +222,43 @@ def decidir_accion(hallazgos):
     if "SECRET_WORD" in tipos:
         return "BLOCK"
 
-    if tipos.intersection({"EMAIL", "PHONE", "URL", "LONG_NUMBER"}):
+    if tipos.intersection({"EMAIL", "PHONE", "URL", "DPI", "LONG_NUMBER"}):
         return "REDACT"
 
     return "ALLOW"
 
 
-def redactar_texto(texto):
-    """Reemplaza datos sensibles por etiquetas seguras."""
+ETIQUETAS_REDACCION = {
+    "EMAIL": "[EMAIL_REDACTED]",
+    "URL": "[URL_REDACTED]",
+    "PHONE": "[PHONE_REDACTED]",
+    "DPI": "[DPI_REDACTED]",
+    "LONG_NUMBER": "[NUMBER_REDACTED]",
+}
+
+
+def redactar_texto(texto, hallazgos=None):
+    """Reemplaza datos sensibles por etiquetas seguras.
+
+    Usa las posiciones de los hallazgos para que la redaccion sea consistente
+    con la deteccion (sin traslapes ni reemplazos dobles). Los reemplazos se
+    aplican de derecha a izquierda para que los indices sigan siendo validos.
+    """
+    if hallazgos is None:
+        hallazgos = detectar_datos_sensibles(texto)
+
     texto_seguro = texto
 
-    reemplazos = {
-        "EMAIL": "[EMAIL_REDACTED]",
-        "URL": "[URL_REDACTED]",
-        "PHONE": "[PHONE_REDACTED]",
-        "LONG_NUMBER": "[NUMBER_REDACTED]",
-    }
+    for hallazgo in sorted(hallazgos, key=lambda h: h["inicio"], reverse=True):
+        etiqueta = ETIQUETAS_REDACCION.get(hallazgo["tipo"])
+        if etiqueta is None:
+            continue
 
-    for tipo, reemplazo in reemplazos.items():
-        patron = PATRONES_SENSIBLES[tipo]
-        texto_seguro = re.sub(patron, reemplazo, texto_seguro)
+        texto_seguro = (
+            texto_seguro[:hallazgo["inicio"]]
+            + etiqueta
+            + texto_seguro[hallazgo["fin"]:]
+        )
 
     return texto_seguro
 
@@ -219,7 +269,7 @@ def aplicar_guardrail(texto):
     accion = decidir_accion(hallazgos)
 
     if accion == "REDACT":
-        texto_seguro = redactar_texto(texto)
+        texto_seguro = redactar_texto(texto, hallazgos)
     elif accion == "BLOCK":
         texto_seguro = None
     else:
